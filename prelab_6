@@ -1,0 +1,82 @@
+#include <avr/io.h>
+#include <util/delay.h>
+
+#define F_CPU 16000000UL // Frecuencia del microcontrolador (16MHz)
+#define BAUD 9600        // Velocidad de comunicación en baudios
+#define MYUBRR F_CPU/16/BAUD-1
+
+// Definir tiempos de espera para anti-rebote
+#define DEBOUNCE_DELAY_MS 50 // Tiempo de espera en milisegundos
+
+// Función para inicializar la comunicación USART
+void USART_Init(unsigned int ubrr) {
+	UBRR0H = (unsigned char)(ubrr>>8);
+	UBRR0L = (unsigned char)ubrr;
+	UCSR0B = (1<<RXEN0)|(1<<TXEN0);    // Habilitar transmisión y recepción
+	UCSR0C = (1<<UCSZ01)|(1<<UCSZ00);  // Formato de trama: 8 bits de datos, 1 bit de parada
+}
+
+// Función para enviar un carácter a través de USART
+void USART_Transmit(unsigned char data) {
+	while (!(UCSR0A & (1<<UDRE0))); // Espera a que el registro de datos esté vacío
+	UDR0 = data;                     // Transmite el dato
+}
+
+// Función para recibir un carácter a través de USART
+unsigned char USART_Receive(void) {
+	while (!(UCSR0A & (1<<RXC0)));   // Espera a que se reciba un dato
+	return UDR0;                     // Devuelve el dato recibido
+}
+
+// Función para detectar el estado estable del botón (anti-rebote)
+char debounce_button(void) {
+	// Verificar si el botón está presionado
+	if (!(PIND & (1 << PD2))) {
+		_delay_ms(DEBOUNCE_DELAY_MS); // Esperar un tiempo breve
+		// Verificar nuevamente si el botón sigue presionado después del tiempo de espera
+		if (!(PIND & (1 << PD2))) {
+			_delay_ms(DEBOUNCE_DELAY_MS); // Esperar otro tiempo breve antes de devolver 1
+			return 1; // Se considera que el botón está presionado de manera estable
+		}
+	}
+	return 0; // Botón no presionado o en estado inestable
+}
+
+int main(void) {
+	// Configurar el puerto B como salida para los LED
+	DDRB = 0xFF; // Todos los pines del puerto B como salida
+
+	// Configurar el puerto D y activar pull-up para el botón
+	DDRD &= ~(1 << PD2);   // PD2 como entrada
+	PORTD |= (1 << PD2);   // Activar pull-up
+
+	// Inicializar la comunicación USART
+	USART_Init(MYUBRR);
+
+	while (1) {
+		// Verificar si se ha presionado el botón con anti-rebote
+		if (debounce_button()) {
+			// Si el botón está presionado, enviar "Hola" a través de USART
+			USART_Transmit('H');
+			USART_Transmit('o');
+			USART_Transmit('l');
+			USART_Transmit('a');
+			USART_Transmit('\r'); // Caracter de retorno de carro
+			USART_Transmit('\n'); // Caracter de nueva línea
+			
+		}
+
+		// Verificar si hay datos recibidos a través de USART
+		if (UCSR0A & (1<<RXC0)) {
+			// Leer el carácter recibido
+			unsigned char received_char = USART_Receive();
+			// Si el carácter recibido es '1', encender los LED en el puerto B
+			if (received_char == '1') {
+				PORTB = 0xFF; // Encender todos los LED
+				} else if (received_char == '0') {
+				PORTB = 0x00; // apagar todos los LED
+			}
+		}
+	}
+	return 0;
+}
